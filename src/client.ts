@@ -1,5 +1,5 @@
 import EventEmitter from './ee'
-import { peekTransferables, uuid } from './utils'
+import { uuid } from './utils'
 import { deserializeError } from 'serialize-error'
 
 interface RpcClientOptions {
@@ -7,27 +7,19 @@ interface RpcClientOptions {
   workers: Worker[]
 }
 
-interface RpcEvent {
-  /** Message event data */
-  data: {
-    /** Remote call uid */
-    uid: string
-    /** `true` flag */
-    libRpc: true
-    /** Error description */
-    error?: string
-    /** Remote procedure name */
-    method?: string
-    /** Server event name */
-    eventName?: string
-    /** Procedure result or event data */
-    data: any
-  }
-}
-
-interface RpcErrorEvent extends ErrorEvent {
-  /** Error ignored if this is not true */
-  libRpc?: boolean
+interface RpcMessageData {
+  /** Remote call uid */
+  uid: string
+  /** `true` flag */
+  libRpc: true
+  /** Error description */
+  error?: string
+  /** Remote procedure name */
+  method?: string
+  /** Server event name */
+  eventName?: string
+  /** Procedure result or event data */
+  data: any
 }
 
 
@@ -71,8 +63,8 @@ export default class RpcClient extends EventEmitter {
    * Message handler
    * @param e - Event object
    */
-  protected handler(e: RpcEvent) {
-    var { uid, error, method, eventName, data, libRpc } = e.data
+  protected handler(e: MessageEvent<RpcMessageData>) {
+    const { uid, error, method, eventName, data, libRpc } = e.data
 
     if (!libRpc) return // ignore non-librpc messages
 
@@ -88,16 +80,14 @@ export default class RpcClient extends EventEmitter {
   /**
    * Error handler
    * https://www.nczonline.net/blog/2009/08/25/web-workers-errors-and-debugging/
-   * @param options - Error handler options
+   * @param e - Error event
    */
-  catch({ message, lineno, filename, libRpc }: RpcErrorEvent) {
-    if (libRpc) {
-      this.emit('error', {
-        message,
-        lineno,
-        filename,
-      })
-    }
+  catch(e: ErrorEvent) {
+    this.emit('error', {
+      message: e.message,
+      lineno: e.lineno,
+      filename: e.filename,
+    })
   }
 
   /**
@@ -136,19 +126,22 @@ export default class RpcClient extends EventEmitter {
   }
 
   /**
-   * Remote procedure call. Only ArrayBuffers will be transferred automatically (not TypedArrays).
+   * Remote procedure call.
    * Error would be thrown, if:
    * - it happened during procedure
    * - you try to call an unexisted procedure
    * - procedure execution takes more than timeout
    * @param method - Remote procedure name
    * @param data - Request data
-   * @param options - Options
+   * @param options - Options (timeout in ms, transferables array)
    * @returns Remote procedure promise
    */
-  call(method: string, data: any, { timeout = 2000 }: any = {}) {
-    var uid = uuid()
-    var transferables = peekTransferables(data)
+  call(
+    method: string,
+    data: any,
+    { timeout = 2000, transferables = [] }: { timeout?: number; transferables?: Transferable[] } = {},
+  ) {
+    const uid = uuid()
     return new Promise((resolve, reject) => {
       this.timeouts[uid] = setTimeout(
         () =>
